@@ -84,32 +84,29 @@ def get_uniprot_id(gene_symbol, organism="9606"):
 
 
 def suggest_role(gene_symbol, process_keyword="coagulation"):
-    try:
-        uniprot_id = get_uniprot_id(gene_symbol)
-        if not uniprot_id:
-            return "unclear"
-        r = requests.get(QUICKGO_API, params={"geneProductId": uniprot_id, "limit": 100})
-        if r.status_code != 200:
-            return "unclear"
-        results = r.json().get("results", [])
-        if not isinstance(results, list):
-            return "unclear"
-        pos, neg = 0, 0
-        for res in results:
-            if not isinstance(res, dict):
-                continue
-            name = str(res.get("goName", "")).lower()
-            if process_keyword in name and "positive regulation" in name:
-                pos += 1
-            elif process_keyword in name and "negative regulation" in name:
-                neg += 1
-        if pos > neg:
-            return "promotes"
-        elif neg > pos:
-            return "suppresses"
+    uniprot_id = get_uniprot_id(gene_symbol)
+    if not uniprot_id:
         return "unclear"
+    r = requests.get(QUICKGO_API, params={"geneProductId": uniprot_id, "limit": 100})
+    if r.status_code != 200:
+        return "unclear"
+    try:
+        results = r.json().get("results", [])
     except Exception:
         return "unclear"
+    pos, neg = 0, 0
+    for res in results:
+        name = res.get("goName", "").lower()
+        if process_keyword in name and "positive regulation" in name:
+            pos += 1
+        elif process_keyword in name and "negative regulation" in name:
+            neg += 1
+    if pos > neg:
+        return "promotes"
+    elif neg > pos:
+        return "suppresses"
+    return "unclear"
+
 
 def get_clinvar_vus(gene_symbol, retmax=30):
     term = f'{gene_symbol}[gene] AND single_gene[prop] AND ("uncertain significance"[Clinical_Significance])'
@@ -248,6 +245,7 @@ with st.sidebar:
     af_threshold = st.number_input("Max allele frequency (rarity filter)", value=0.01, format="%.4f")
     top_fraction = st.slider("Fraction of top variants used for pairing", 0.1, 1.0, 0.5)
     run_button = st.button("Run pipeline", type="primary")
+
     st.markdown("---")
     st.caption("Optional: override auto-suggested roles (one per line, format `GENE:role`)")
     st.caption("Valid roles: promotes, suppresses, substrate, crosslinker")
@@ -271,15 +269,17 @@ if run_button:
     for gene in gene_panel_df["gene"]:
         suggested_roles[gene] = suggest_role(gene)
         time.sleep(0.2)
-    role_display_df = pd.DataFrame(list(suggested_roles.items()), columns=["gene", "auto_suggested_role"])
     manual_overrides = {}
     for line in role_override_text.strip().split("\n"):
         if ":" in line:
             gene, role = line.split(":", 1)
             manual_overrides[gene.strip().upper()] = role.strip()
     final_roles = {**suggested_roles, **manual_overrides}
-    st.subheader("Auto-suggested gene roles (from GO annotations)")
-    st.caption("These are a starting point, not ground truth — shown transparently rather than hidden.")
+
+    role_display_df = pd.DataFrame(list(suggested_roles.items()), columns=["gene", "auto_suggested_role"])
+    role_display_df["final_role"] = role_display_df["gene"].map(final_roles)
+    st.subheader("Gene roles (auto-suggested, with manual overrides applied)")
+    st.caption("Auto-suggestions are a starting point, not ground truth — overrides from the sidebar are shown applied here.")
     st.dataframe(role_display_df, use_container_width=True)
     progress.progress(30, text="Fetching candidate variants (this takes a minute)...")
 
@@ -340,7 +340,7 @@ if run_button:
             v_a, v_b = top_variants.iloc[i], top_variants.iloc[j]
             if v_a["gene"] == v_b["gene"]:
                 continue
-           role_a = final_roles.get(v_a["gene"], "unclear")
+            role_a = final_roles.get(v_a["gene"], "unclear")
             role_b = final_roles.get(v_b["gene"], "unclear")
             synergy = get_synergy(role_a, role_b)
             path_factor = pathway_distance_factor(v_a["gene"], v_b["gene"], G)

@@ -84,29 +84,32 @@ def get_uniprot_id(gene_symbol, organism="9606"):
 
 
 def suggest_role(gene_symbol, process_keyword="coagulation"):
-    uniprot_id = get_uniprot_id(gene_symbol)
-    if not uniprot_id:
-        return "unclear"
-    r = requests.get(QUICKGO_API, params={"geneProductId": uniprot_id, "limit": 100})
-    if r.status_code != 200:
-        return "unclear"
     try:
+        uniprot_id = get_uniprot_id(gene_symbol)
+        if not uniprot_id:
+            return "unclear"
+        r = requests.get(QUICKGO_API, params={"geneProductId": uniprot_id, "limit": 100})
+        if r.status_code != 200:
+            return "unclear"
         results = r.json().get("results", [])
+        if not isinstance(results, list):
+            return "unclear"
+        pos, neg = 0, 0
+        for res in results:
+            if not isinstance(res, dict):
+                continue
+            name = str(res.get("goName", "")).lower()
+            if process_keyword in name and "positive regulation" in name:
+                pos += 1
+            elif process_keyword in name and "negative regulation" in name:
+                neg += 1
+        if pos > neg:
+            return "promotes"
+        elif neg > pos:
+            return "suppresses"
+        return "unclear"
     except Exception:
         return "unclear"
-    pos, neg = 0, 0
-    for res in results:
-        name = res.get("goName", "").lower()
-        if process_keyword in name and "positive regulation" in name:
-            pos += 1
-        elif process_keyword in name and "negative regulation" in name:
-            neg += 1
-    if pos > neg:
-        return "promotes"
-    elif neg > pos:
-        return "suppresses"
-    return "unclear"
-
 
 def get_clinvar_vus(gene_symbol, retmax=30):
     term = f'{gene_symbol}[gene] AND single_gene[prop] AND ("uncertain significance"[Clinical_Significance])'

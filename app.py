@@ -248,6 +248,14 @@ with st.sidebar:
     af_threshold = st.number_input("Max allele frequency (rarity filter)", value=0.01, format="%.4f")
     top_fraction = st.slider("Fraction of top variants used for pairing", 0.1, 1.0, 0.5)
     run_button = st.button("Run pipeline", type="primary")
+    st.markdown("---")
+    st.caption("Optional: override auto-suggested roles (one per line, format `GENE:role`)")
+    st.caption("Valid roles: promotes, suppresses, substrate, crosslinker")
+    role_override_text = st.text_area(
+        "Manual role overrides",
+        value="F2:promotes\nF5:promotes\nFGA:substrate\nFGB:substrate\nFGG:substrate\nF13A1:crosslinker\nSERPINC1:suppresses\nPROS1:suppresses\nTHBD:suppresses\nPROC:suppresses",
+        height=150
+    )
 
 if run_button:
     progress = st.progress(0, text="Fetching gene panel...")
@@ -264,6 +272,12 @@ if run_button:
         suggested_roles[gene] = suggest_role(gene)
         time.sleep(0.2)
     role_display_df = pd.DataFrame(list(suggested_roles.items()), columns=["gene", "auto_suggested_role"])
+    manual_overrides = {}
+    for line in role_override_text.strip().split("\n"):
+        if ":" in line:
+            gene, role = line.split(":", 1)
+            manual_overrides[gene.strip().upper()] = role.strip()
+    final_roles = {**suggested_roles, **manual_overrides}
     st.subheader("Auto-suggested gene roles (from GO annotations)")
     st.caption("These are a starting point, not ground truth — shown transparently rather than hidden.")
     st.dataframe(role_display_df, use_container_width=True)
@@ -326,8 +340,8 @@ if run_button:
             v_a, v_b = top_variants.iloc[i], top_variants.iloc[j]
             if v_a["gene"] == v_b["gene"]:
                 continue
-            role_a = suggested_roles.get(v_a["gene"], "unclear")
-            role_b = suggested_roles.get(v_b["gene"], "unclear")
+           role_a = final_roles.get(v_a["gene"], "unclear")
+            role_b = final_roles.get(v_b["gene"], "unclear")
             synergy = get_synergy(role_a, role_b)
             path_factor = pathway_distance_factor(v_a["gene"], v_b["gene"], G)
             combined = v_a["ptrs_single"] + v_b["ptrs_single"] + synergy * path_factor
